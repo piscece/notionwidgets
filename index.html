@@ -1,0 +1,271 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Ilse's World Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500&display=swap">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+
+<style>
+  :root {
+    --bg: #0e1117;
+    --surface: #151b27;
+    --border: #232d3f;
+    --fg: #e2e8f4;
+    --fg-muted: #7a8599;
+    --visited: #6abf6a;
+    --visited-glow: rgba(106,191,106,0.18);
+    --visited-hover: #8fd48f;
+    --unvisited: #1e2a3a;
+    --unvisited-hover: #2a3a50;
+    --outline: #0e1117;
+    color-scheme: dark;
+    --font-mono: 'DM Mono', monospace;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .header {
+    padding: 20px 24px 12px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .header h1 {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--visited);
+    letter-spacing: 0.06em;
+    margin: 0;
+  }
+
+  .header .sub {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--fg-muted);
+  }
+
+  .map-wrap {
+    padding: 0 16px;
+    position: relative;
+  }
+
+  #map-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+
+  #map-svg .country {
+    fill: var(--unvisited);
+    stroke: var(--outline);
+    stroke-width: 0.5px;
+    transition: fill 0.12s;
+    cursor: default;
+  }
+
+  #map-svg .country:hover { fill: var(--unvisited-hover); }
+  #map-svg .country.visited { fill: var(--visited); cursor: pointer; }
+  #map-svg .country.visited:hover { fill: var(--visited-hover); }
+
+  /* Sphere/globe outline */
+  #map-svg .sphere {
+    fill: var(--surface);
+  }
+
+  /* Graticule */
+  #map-svg .graticule {
+    fill: none;
+    stroke: var(--border);
+    stroke-width: 0.3px;
+  }
+
+  /* Tooltip */
+  #tip {
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--visited);
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-family: var(--font-mono);
+    font-size: 0.73rem;
+    color: var(--fg);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s;
+    white-space: nowrap;
+    z-index: 50;
+  }
+  #tip.on { opacity: 1; }
+
+  /* Chips */
+  .chips-section {
+    padding: 14px 24px 26px;
+  }
+
+  .chips-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    margin-bottom: 10px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(106,191,106,0.1);
+    border: 1px solid rgba(106,191,106,0.4);
+    border-radius: 20px;
+    padding: 5px 13px 5px 10px;
+    font-size: 0.83rem;
+    color: var(--visited);
+    font-weight: 500;
+  }
+
+  .chip .flag { font-size: 1.05rem; line-height: 1; }
+</style>
+
+<div class="header">
+  <h1>// visited_countries</h1>
+  <span class="sub">4 countries · 3 continents</span>
+</div>
+
+<div class="map-wrap">
+  <svg id="map-svg"></svg>
+</div>
+
+<div class="chips-section">
+  <div class="chips-label">Places I've been</div>
+  <div class="chips">
+    <div class="chip"><span class="flag">🇺🇸</span> United States</div>
+    <div class="chip"><span class="flag">🇲🇽</span> Mexico</div>
+    <div class="chip"><span class="flag">🇰🇷</span> South Korea</div>
+    <div class="chip"><span class="flag">🇪🇸</span> Spain</div>
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<script>
+const VISITED = new Set(['USA','MEX','KOR','ESP']);
+
+const NAMES = {
+  USA:'United States', MEX:'Mexico', KOR:'South Korea', ESP:'Spain',
+  CAN:'Canada', GBR:'United Kingdom', FRA:'France', DEU:'Germany',
+  ITA:'Italy', JPN:'Japan', CHN:'China', RUS:'Russia', BRA:'Brazil',
+  AUS:'Australia', IND:'India', ARG:'Argentina', ZAF:'South Africa',
+  NGA:'Nigeria', EGY:'Egypt', TUR:'Turkey', IDN:'Indonesia', THA:'Thailand',
+  PRT:'Portugal', NLD:'Netherlands', BEL:'Belgium', CHE:'Switzerland',
+  SWE:'Sweden', NOR:'Norway', DNK:'Denmark', FIN:'Finland', POL:'Poland',
+  GRC:'Greece', CZE:'Czech Republic', AUT:'Austria', HUN:'Hungary',
+  ROU:'Romania', UKR:'Ukraine', NZL:'New Zealand', CHL:'Chile',
+  COL:'Colombia', PER:'Peru', VEN:'Venezuela', BOL:'Bolivia',
+  MAR:'Morocco', DZA:'Algeria', ETH:'Ethiopia', KEN:'Kenya',
+  SAU:'Saudi Arabia', IRN:'Iran', IRQ:'Iraq', ISR:'Israel',
+  AFG:'Afghanistan', PAK:'Pakistan', BGD:'Bangladesh', MMR:'Myanmar',
+  VNM:'Vietnam', PHL:'Philippines', MYS:'Malaysia'
+};
+
+const tip = document.getElementById('tip');
+const svg = d3.select('#map-svg');
+
+// Set up projection and path
+const width = 960;
+const height = 480;
+svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+const projection = d3.geoNaturalEarth1()
+  .scale(153)
+  .translate([width / 2, height / 2]);
+
+const path = d3.geoPath().projection(projection);
+
+// Draw graticule
+svg.append('path')
+  .datum(d3.geoGraticule()())
+  .attr('class', 'graticule')
+  .attr('d', path);
+
+// Load world topology from CDN
+fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json')
+  .then(r => r.json())
+  .then(world => {
+    const countries = topojson.feature(world, world.objects.countries);
+
+    // ISO numeric → alpha-3 mapping for the countries we care about
+    const numToA3 = {
+      840:'USA', 484:'MEX', 410:'KOR', 724:'ESP',
+      124:'CAN', 826:'GBR', 250:'FRA', 276:'DEU',
+      380:'ITA', 392:'JPN', 156:'CHN', 643:'RUS',
+      76:'BRA', 36:'AUS', 356:'IND', 32:'ARG',
+      710:'ZAF', 566:'NGA', 818:'EGY', 792:'TUR',
+      360:'IDN', 764:'THA', 620:'PRT', 528:'NLD',
+      56:'BEL', 756:'CHE', 752:'SWE', 578:'NOR',
+      208:'DNK', 246:'FIN', 616:'POL', 300:'GRC',
+      203:'CZE', 40:'AUT', 348:'HUN', 642:'ROU',
+      804:'UKR', 554:'NZL', 152:'CHL', 170:'COL',
+      604:'PER', 862:'VEN', 68:'BOL', 504:'MAR',
+      12:'DZA', 231:'ETH', 404:'KEN', 682:'SAU',
+      364:'IRN', 368:'IRQ', 376:'ISR', 4:'AFG',
+      586:'PAK', 50:'BGD', 104:'MMR', 704:'VNM',
+      608:'PHL', 458:'MYS'
+    };
+
+    svg.selectAll('.country')
+      .data(countries.features)
+      .enter().append('path')
+      .attr('class', d => {
+        const a3 = numToA3[+d.id];
+        return 'country' + (a3 && VISITED.has(a3) ? ' visited' : '');
+      })
+      .attr('d', path)
+      .on('mousemove', function(event, d) {
+        const a3 = numToA3[+d.id];
+        const name = a3 ? (NAMES[a3] || a3) : null;
+        if (!name) return;
+        const isVisited = a3 && VISITED.has(a3);
+        tip.textContent = isVisited ? `✓ ${name}` : name;
+        tip.classList.add('on');
+        tip.style.left = (event.clientX + 14) + 'px';
+        tip.style.top = (event.clientY - 30) + 'px';
+      })
+      .on('mouseleave', () => tip.classList.remove('on'));
+  })
+  .catch(() => {
+    // Fallback: show a note if fetch is blocked
+    svg.append('text')
+      .attr('x', width/2).attr('y', height/2)
+      .attr('text-anchor','middle')
+      .attr('fill','#6abf6a')
+      .attr('font-family','DM Mono, monospace')
+      .attr('font-size','14')
+      .text('Map data could not be loaded in preview — will work when published.');
+  });
+</script>
+
+</body></html>
